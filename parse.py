@@ -19,7 +19,7 @@ now = str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 reply = vk.wall.get(owner_id=owner_id, count=0)
 total_count = reply['count']
 
-newDB = false
+newDB = true
 old_total_count = 0
 data = None
 # >>> Мы ПЫТАЕМСЯ прочитать файл с данными
@@ -28,7 +28,7 @@ try:
     data = json.load(outfile)
     old_total_count = data['total_count']
     # FIXME: Костыль (возможно)
-    newDB = true
+    newDB = false
 except:
     print("Can't find previous parsing data")
 finally:
@@ -40,9 +40,9 @@ finally:
 # парсим посты и переворачиваем список с ними, потому что нам нужны данные от старых к новым, а парсятся
 # от новых к старым
 # также обрезаем список до нужного нам кол-ва постов, так как get_all получает кол-во постов, кратное 25
-reply = tools.get_all(method='wall.get', max_count=1, values={'owner_id': owner_id}, limit=1)
+reply = tools.get_all(method='wall.get', max_count=max_count, values={'owner_id': owner_id}, limit=1)
 items = reply['items'][:count:]
-items = reply['items'][::-1]
+items = items[::-1]
 
 # неприятно костыльно создаем два списка, в posts сохраняем все прошлые посты из data, потом туда добавим новые
 # posts_db оставляем пустым, потом туда добавим также новые (но там будут только они)
