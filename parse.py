@@ -3,7 +3,7 @@ import json
 from secrets import phone_number, password, owner_id, password_db
 from datetime import datetime
 import psycopg2
-# FIXME ЭТОТ КОД НЕ ТЕСТИРОВАЛСЯ, КОММИТ ПОКАЗЫВАЕТ ТОЛЬКО ОБЩИЙ ПРИНЦИП И МОЖЕТ НЕ РАБОТАТЬ
+
 # создание сессии
 vk_session = vk_api.VkApi(phone_number, password, app_id=2685278)
 vk_session.auth(token_only=True)
@@ -11,28 +11,35 @@ vk_session.auth(token_only=True)
 vk = vk_session.get_api()
 tools = vk_api.VkTools(vk_session)
 
-# сохраняем текущую дату (в str, к сожалению, потому что json ругается, но лучше исправить в дату, чтобы
-# в бд тоже дата закидывалась)
+# FIXME сохраняем текущую дату (в str, к сожалению, потому что json ругается, но лучше исправить в datetime)
 now = str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
 # получаем общее кол-во постов в группе
 reply = vk.wall.get(owner_id=owner_id, count=0)
 total_count = reply['count']
 
-newDB = true
+newDB = True
 old_total_count = 0
 data = None
-# >>> Мы ПЫТАЕМСЯ прочитать файл с данными
+
+# создаем два списка, в posts сохраняем все прошлые посты из data, потом туда добавим новые (или оставляем пустым,
+# если newDB = True)
+# posts_db оставляем пустым, потом туда добавим также новые посты
+posts = []
+posts_db = []
+
+# ПЫТАЕМСЯ прочитать файл с данными
 try:
   with open('posts.json', 'r', encoding='utf-8') as outfile:
     data = json.load(outfile)
     old_total_count = data['total_count']
+    posts = data['items']
     # FIXME: Костыль (возможно)
-    newDB = false
+    newDB = False
 except:
     print("Can't find previous parsing data")
 finally:
-    # >>> По окончанию блока подставляем данные о тотале
+    # По окончанию блока подставляем данные о тотале
     # считаем, сколько постов добавилось, и задаем max_count
     count = total_count - old_total_count
     max_count = count // 25 + 1
@@ -40,14 +47,17 @@ finally:
 # парсим посты и переворачиваем список с ними, потому что нам нужны данные от старых к новым, а парсятся
 # от новых к старым
 # также обрезаем список до нужного нам кол-ва постов, так как get_all получает кол-во постов, кратное 25
-reply = tools.get_all(method='wall.get', max_count=max_count, values={'owner_id': owner_id}, limit=1)
+
+# правильный запрос
+# reply = tools.get_all(method='wall.get', max_count=max_count, values={'owner_id': owner_id})
+
+# все посты, почему-то (нет limit)
+# reply = tools.get_all(method='wall.get', max_count=9, values={'owner_id': owner_id})
+
+# парсит 1125 постов c limit=1000, 450 с limit=300
+reply = tools.get_all(method='wall.get', max_count=9, values={'owner_id': owner_id}, limit=300)
 items = reply['items'][:count:]
 items = items[::-1]
-
-# неприятно костыльно создаем два списка, в posts сохраняем все прошлые посты из data, потом туда добавим новые
-# posts_db оставляем пустым, потом туда добавим также новые (но там будут только они)
-posts = data['items']
-posts_db = []
 
 # функция, чтобы обернуть комменты просто в список текстов
 def get_comments(items):
@@ -57,20 +67,26 @@ def get_comments(items):
             comments.append(item['text'])
     return comments
 
-# мерзкий цикл
+# функция с проверкой для просмотров, потому что их стали считать только в 2017
+def get_views(item):
+    try:
+        return item['views']['count']
+    except KeyError:
+        return 0
+
 for item in items:
-    # создаем пустой пост, куда потом всего напихаем
+    # создаем пустой пост
     post = {}
     # собираем комменты данного поста (не очень оптимально, но по-другому вряд ли можно)
     comments_reply = vk.wall.get_comments(owner_id=owner_id, post_id=item['id'], count=100, sort='asc',
                                           preview_length=0)
     comments = get_comments(comments_reply['items'])
 
-    # прикалываемся со свойствами
+    # свойства
     if item['marked_as_ads'] == 0:
         post['text'] = item['text']
         post['date'] = str(datetime.fromtimestamp(float(item['date'])))
-        post['views'] = item['views']['count']
+        post['views'] = get_views(post)
         post['likes'] = item['likes']['count']
         post['reposts'] = item['reposts']['count']
         post['comments'] = {'count': len(comments), 'items': comments}
@@ -87,11 +103,12 @@ result = {'total_count': total_count, 'date_updated': now, 'items': posts}
 with open('posts.json', 'w', encoding='utf-8') as outfile:
     outfile.write(json.dumps(result, ensure_ascii=False, indent=2))
 
-# подключаемся к бд (мне лень убрать пароли в другой файл)
+# подключаемся к бд
 conn = psycopg2.connect(database="parsed_posts", user="postgres", password=password_db, host="localhost", port="5432")
 
 cur = conn.cursor()
 res = None
+
 if newDB:
     # очищаем таблицы и сбрасываем PK
     cur.execute('TRUNCATE TABLE comments RESTART IDENTITY CASCADE')
@@ -102,23 +119,20 @@ else:
     cur.execute('SELECT post_id FROM posts ORDER BY post_id DESC LIMIT 1')
     res = cur.fetchone()
 
-# проверка говна, которая будет нужна, только если парсер будет один общий
+# задаем корректное i
 if res is not None:
-    i = res[0]
+    i = res[0] + 1
 else:
     i = 1
 
-# просто записываем новые посты в бд
-# юзаем posts
-# FIXME предположу что тут нужен posts_db
+# записываем посты в бд
 for post in posts_db:
     cur.execute('INSERT INTO posts (views, likes, reposts, attachments, text, date) VALUES (%s, %s, %s, %s, %s, %s)',
                 (post['views'], post['likes'], post['reposts'], post['attachments'], post['text'], post['date']))
 
 conn.commit()
 
-# записываем комменты новых постов в бд
-# опять же юзаем posts
+# записываем комменты постов в бд
 for post in posts_db:
     # вытаскиваем комменты из поста
     comments = post['comments']['items']
