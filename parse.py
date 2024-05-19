@@ -1,6 +1,6 @@
 import vk_api
 import json
-from secrets import phone_number, password, owner_id, password_db
+from project_secrets import phone_number, password, owner_id, password_db
 from datetime import datetime
 import psycopg2
 
@@ -49,13 +49,13 @@ finally:
 # также обрезаем список до нужного нам кол-ва постов, так как get_all получает кол-во постов, кратное 25
 
 # правильный запрос
-# reply = tools.get_all(method='wall.get', max_count=max_count, values={'owner_id': owner_id})
+reply = tools.get_all(method='wall.get', max_count=9, values={'owner_id': owner_id}, limit=total_count)
 
 # все посты, почему-то (нет limit)
 # reply = tools.get_all(method='wall.get', max_count=9, values={'owner_id': owner_id})
 
 # парсит 1125 постов c limit=1000, 450 с limit=300
-reply = tools.get_all(method='wall.get', max_count=9, values={'owner_id': owner_id}, limit=300)
+# reply = tools.get_all(method='wall.get', max_count=9, values={'owner_id': owner_id}, limit=3000)
 items = reply['items'][:count:]
 items = items[::-1]
 
@@ -104,7 +104,7 @@ with open('posts.json', 'w', encoding='utf-8') as outfile:
     outfile.write(json.dumps(result, ensure_ascii=False, indent=2))
 
 # подключаемся к бд
-conn = psycopg2.connect(database="parsed_posts", user="postgres", password=password_db, host="localhost", port="5432")
+conn = psycopg2.connect(database="abitmobot", user="postgres", password=password_db, host="localhost", port="5432")
 
 cur = conn.cursor()
 res = None
